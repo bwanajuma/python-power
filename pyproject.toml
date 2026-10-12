@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kplc-powerbill-renamer"
+version = "0.2.0"
+description = "Extract KPLC account numbers from scanned PDFs and summarise swap dumps"
+requires-python = ">=3.10"
+dependencies = [
+    "PyMuPDF>=1.24",
+    "Pillow>=10.0",
+    "openpyxl>=3.0",
+    "pytesseract>=0.3.10",
+]
+
+[project.scripts]
+kplc-rename = "powerbills.cli:main"
+kplc-swap = "powerbills.swap_cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RET", "ARG"]
+ignore = [
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ARG"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["powerbills"]

@@ -1,0 +1,27 @@
+node_modules/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Source data and scans: large binaries, keep them out of the repo
+Swap Dump/
+backup/
+raw_files/
+
+# Generated workbooks and summaries
+excel/September KPLC Power Bills.xlsx
+excel/Swap Net SOC Summary.xlsx
+excel/Swap Net SOC Summary.csv
