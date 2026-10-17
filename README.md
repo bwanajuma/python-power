@@ -5,8 +5,8 @@ Two tools:
 - `kplc-rename` reads account numbers off scanned KPLC bill PDFs with OCR,
   looks the account up in an Excel workbook, and renames each PDF to
   `<station-name>.pdf`.
-- `kplc-swap` sums Net SOC per station in the monthly swap dumps and matches
-  the result against the same station list.
+- `kplc-swap` analyses swap activity and business metrics per station directly
+  from the monthly swap dumps.
 
 ## Bill renaming
 
@@ -69,8 +69,8 @@ The extract-only command skips station lookup and all rename processing. It
 writes captured bill data to `excel/September KPLC Power Bills.xlsx` by default.
 Captured fields include `consumption` from the bill's Fuel Energy Cost line,
 the bill total, consumption period, low- and high-rate consumption, classified
-method of charge, and due date. Use `--output` to choose another output
-workbook. The default run previews planned renames; pass
+method of charge, issue date, and due date. Use `--output` to choose another
+output workbook. The default run previews planned renames; pass
 `--apply` to perform them.
 
 You can also pass individual PDFs or a glob. Existing destination files are
@@ -83,8 +83,19 @@ error` to stop at the first conflict.
 kplc-swap
 ```
 
-Defaults to `Swap Dump/*.xlsx`, writing `excel/Swap Net SOC Summary.xlsx` and
-`excel/Swap Net SOC Summary.csv`.
+Defaults to `Swap Dump/*.xlsx`, writing `excel/Swap Station Business Metrics.xlsx`
+and `excel/Swap Station Business Metrics.csv`.
+
+To calculate September 2026 only, select that dump explicitly:
+
+```bash
+kplc-swap "Swap Dump/September_Swap_Data.xlsx" --period 2026-09
+```
+
+This produces the same output files with September-only data: 885,110 swaps
+across 497 swap stations, 65,799,119 Net SOC, 65,698,381 Billable SOC, and
+186,442,828 in Swap Cost. Running `kplc-swap` without an input still processes
+all matching dumps.
 
 Each dump is one month of battery swaps, roughly 900k rows whose worksheet XML
 expands to about 800 MB inside the .xlsx container. `kplc-swap` never loads the
@@ -101,20 +112,18 @@ August. Override it when a filename is unhelpful:
 kplc-swap --period 2026-08 --year 2026 "Swap Dump/August_Swap_Data.xlsx"
 ```
 
-Station names are matched to the `Station` column of the workbook template,
-case- and punctuation-insensitively, and reported as `Matched Station Name`.
-Swap stations with no match are listed in `Unmatched Swap Stations`, and KPLC
-stations that recorded no swaps in `KPLC Stations Without Swaps`. Pass
-`--no-template` to skip matching, `--template` to point at a different station
-list, and `--csv` to redirect the CSV.
+Swap analysis is independent of the power bill workbook: each station is
+identified by its name in the swap dump, and station names are never looked up
+or matched to the power bill station list. Use `--csv` to redirect the CSV.
+The summary includes swap count, total Net SOC, total Billable SOC, total Swap
+Cost, average Net SOC per swap, and first and last swap timestamps for each
+station across the supplied dump files.
 
-The workbook has four sheets:
+The workbook has two sheets:
 
 | Sheet | Contents |
 | --- | --- |
-| `Station Summary` | One row per matched station: swaps, Net SOC, Billable SOC, Swap Cost, average Net SOC, first and last swap |
-| `Unmatched Swap Stations` | Swap stations absent from the station list, so nothing is silently dropped |
-| `KPLC Stations Without Swaps` | Station-list entries with no swaps in the period |
+| `Station Summary` | One row per raw swap station: swaps, Net SOC, Billable SOC, Swap Cost, average Net SOC, first and last swap |
 | `Metadata` | Source file, worksheet, period bounds, rows scanned, rows outside the period, and totals |
 
 Check `Metadata` before trusting a total: `Rows outside period` non-zero means

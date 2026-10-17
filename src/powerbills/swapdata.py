@@ -35,7 +35,6 @@ METRIC_COLUMNS = (NET_SOC_COLUMN, "Billable SOC", "Swap Cost")
 AGGREGATED_HEADERS = (DATE_COLUMN, STATION_COLUMN, *METRIC_COLUMNS)
 SUMMARY_HEADERS = (
     "Period",
-    "Matched Station Name",
     "Swap Station",
     "Swaps",
     "Net SOC",
@@ -149,11 +148,6 @@ def column_letters(index: int) -> str:
 def serial_to_datetime(value: float) -> datetime:
     """Convert an Excel date serial to a datetime, rounding away float drift."""
     return EXCEL_EPOCH + timedelta(seconds=round(value * 86400))
-
-
-def normalize_station(value: object) -> str:
-    """Fold a station name to a key that ignores case and spacing noise."""
-    return re.sub(r"[^a-z0-9]+", " ", str(value).strip().lower()).strip()
 
 
 def period_bounds(period: str) -> tuple[datetime, datetime]:
@@ -390,51 +384,8 @@ def aggregate_swap_dump(
     return report
 
 
-def load_station_names(workbook: Path | str, sheet_name: str | None = None) -> dict[str, str]:
-    """Return normalized name to station name for a workbook's Station column."""
-    try:
-        from openpyxl import load_workbook
-    except ImportError as error:  # pragma: no cover - dependency guard
-        raise SwapDumpError("openpyxl is required; run `python -m pip install -e .`") from error
-
-    book = load_workbook(workbook, read_only=True, data_only=True)
-    try:
-        sheet = book[sheet_name] if sheet_name else book[book.sheetnames[0]]
-        rows = sheet.iter_rows(values_only=True)
-        header = next(rows, ())
-        try:
-            index = [str(name).strip() if name else "" for name in header].index(STATION_COLUMN)
-        except ValueError as error:
-            raise SwapDumpError(
-                f"{Path(workbook).name} needs a '{STATION_COLUMN}' column"
-            ) from error
-        names: dict[str, str] = {}
-        for row in rows:
-            if len(row) <= index or row[index] is None:
-                continue
-            name = str(row[index]).strip()
-            if name:
-                names.setdefault(normalize_station(name), name)
-        return names
-    finally:
-        book.close()
-
-
-def match_stations(
-    report: SwapReport, known: dict[str, str]
-) -> list[tuple[StationTotals, str | None]]:
-    """Pair each station in a report with its KPLC name, matched names first."""
-    pairs = [
-        (totals, known.get(normalize_station(totals.station)))
-        for totals in report.stations.values()
-    ]
-    pairs.sort(key=lambda pair: (pair[1] is None, (pair[1] or pair[0].station).lower()))
-    return pairs
-
-
 def _row(
     periods: Sequence[str],
-    matched: str,
     swap_station: str,
     swaps: int,
     net_soc: float,
@@ -446,7 +397,6 @@ def _row(
     """Build one summary row in the shared output column order."""
     return {
         "Period": ", ".join(periods),
-        "Matched Station Name": matched,
         "Swap Station": swap_station,
         "Swaps": swaps,
         "Net SOC": round(net_soc, 3),
@@ -458,15 +408,14 @@ def _row(
     }
 
 
-def summary_rows(reports: Sequence[SwapReport], known: dict[str, str]) -> list[dict[str, object]]:
+def summary_rows(reports: Sequence[SwapReport]) -> list[dict[str, object]]:
     """Flatten every report into one output row per station per period."""
     rows: list[dict[str, object]] = []
     for report in reports:
-        for totals, matched in match_stations(report, known):
+        for totals in report.stations.values():
             rows.append(
                 _row(
                     periods=[report.period or ""],
-                    matched=matched or "",
                     swap_station=totals.station,
                     swaps=totals.swaps,
                     net_soc=totals.net_soc,
@@ -484,7 +433,6 @@ class _Accumulator:
     """Running totals for one station across every period being summarised."""
 
     periods: list[str]
-    matched: str
     swap_station: str
     swaps: int
     net_soc: float
@@ -494,11 +442,10 @@ class _Accumulator:
     last_swap: datetime | None
 
     @classmethod
-    def of(cls, period: str, matched: str, totals: StationTotals) -> _Accumulator:
+    def of(cls, period: str, totals: StationTotals) -> _Accumulator:
         """Start an accumulator from one station's totals in one period."""
         return cls(
             periods=[period],
-            matched=matched,
             swap_station=totals.station,
             swaps=totals.swaps,
             net_soc=totals.net_soc,
@@ -523,7 +470,6 @@ class _Accumulator:
         """Render the accumulator as a summary row."""
         return _row(
             periods=self.periods,
-            matched=self.matched,
             swap_station=self.swap_station,
             swaps=self.swaps,
             net_soc=self.net_soc,
@@ -534,25 +480,21 @@ class _Accumulator:
         )
 
 
-def combine_reports(
-    reports: Sequence[SwapReport], known: dict[str, str]
-) -> list[dict[str, object]]:
-    """Total every period per matched station into single summary rows."""
+def combine_reports(reports: Sequence[SwapReport]) -> list[dict[str, object]]:
+    """Total every period per raw swap station into a single summary row."""
     combined: dict[str, _Accumulator] = {}
     for report in reports:
         period = report.period or ""
-        for totals, matched in match_stations(report, known):
-            key = matched or totals.station
+        for totals in report.stations.values():
+            key = totals.station
             accumulator = combined.get(key)
             if accumulator is None:
-                combined[key] = _Accumulator.of(period, matched or "", totals)
+                combined[key] = _Accumulator.of(period, totals)
             else:
                 accumulator.add(period, totals)
 
     rows = [accumulator.as_row() for accumulator in combined.values()]
-    rows.sort(
-        key=lambda row: (not row["Matched Station Name"], str(row["Matched Station Name"]).lower())
-    )
+    rows.sort(key=lambda row: str(row["Swap Station"]).lower())
     return rows
 
 
@@ -565,9 +507,8 @@ def write_summary(
     rows: Sequence[dict[str, object]],
     reports: Sequence[SwapReport],
     output: Path | str,
-    known: dict[str, str] | None = None,
 ) -> Path:
-    """Write the station summary, its exceptions, and an audit trail."""
+    """Write the raw-station summary and an audit trail."""
     try:
         from openpyxl import Workbook
     except ImportError as error:  # pragma: no cover - dependency guard
@@ -580,20 +521,6 @@ def write_summary(
     sheet.append(list(SUMMARY_HEADERS))
     for row in rows:
         sheet.append([row.get(header) for header in SUMMARY_HEADERS])
-
-    unmatched = book.create_sheet("Unmatched Swap Stations")
-    unmatched.append(["Period", "Swap Station", "Swaps", "Net SOC"])
-    for row in rows:
-        if not row["Matched Station Name"]:
-            unmatched.append([row["Period"], row["Swap Station"], row["Swaps"], row["Net SOC"]])
-
-    if known is not None:
-        seen = {str(row["Matched Station Name"]) for row in rows if row["Matched Station Name"]}
-        idle = book.create_sheet("KPLC Stations Without Swaps")
-        idle.append(["Matched Station Name"])
-        for name in sorted(known.values(), key=str.lower):
-            if name not in seen:
-                idle.append([name])
 
     audit = book.create_sheet("Metadata")
     audit.append(["Report", "Value"])

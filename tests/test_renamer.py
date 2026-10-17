@@ -27,6 +27,7 @@ class ExtractAccountNumberTests(unittest.TestCase):
         bill = extract_bill_data(
             "ACCOUNT NUMBER: 175565209\n"
             "Date Due: 09/09/2026\n"
+            "Date of Issue: 23/08/2026\n"
             "Consumption Period: 23/07/2026-22/08/2026\n"
             "ELECTRICITY BILL: Ksh 103.00\n"
             "Fuel Energy Cost: Ksh 1,234.50\n"
@@ -38,8 +39,14 @@ class ExtractAccountNumberTests(unittest.TestCase):
         self.assertEqual(bill.consumption, 1234.5)
         self.assertEqual(bill.bill, 103.0)
         self.assertEqual(bill.due_date, "09/09/2026")
+        self.assertEqual(bill.issue_date, "23/08/2026")
         self.assertEqual(bill.low_rate_consumption, 2.0)
         self.assertEqual(bill.high_rate_consumption, 3.0)
+
+    def test_extracts_issue_date_label_variant(self):
+        bill = extract_bill_data("ACCOUNT NUMBER: 175565209\nIssue Date: 23/08/2026")
+        assert bill is not None
+        self.assertEqual(bill.issue_date, "23/08/2026")
 
     def test_extracts_due_date_and_method_of_charge(self):
         bill = extract_bill_data(
@@ -177,6 +184,7 @@ class WorkbookLookupTests(unittest.TestCase):
             workbook.save(template)
             bill = extract_bill_data(
                 "ACCOUNT NUMBER: 178924769\nDate Due: 09/09/2026\n"
+                "Issue Date: 23/08/2026\n"
                 "Consumption Period: 23/07/2026-22/08/2026\n"
                 "ELECTRICITY BILL: Ksh 103.00\n"
                 "Fuel Energy Cost 1,234.50\n"
@@ -196,6 +204,7 @@ class WorkbookLookupTests(unittest.TestCase):
                 "consumption": 1234.5,
                 "Bill": 103,
                 "Due Date": "09/09/2026",
+                "Issue Date": "23/08/2026",
                 "Method of Charge": "Small Commercial (SC3)",
                 "LowRateConsumption": None,
                 "HighRateConsumption": None,
@@ -267,6 +276,7 @@ class CliDefaultsTests(unittest.TestCase):
             ocr_text = (
                 "ACCOUNT NUMBER: 175565209\n"
                 "Due Date: 07/10/2026\n"
+                "Date of Issue: 22/09/2026\n"
                 "Consumption Period: 29/08/2026-21/09/2026\n"
                 "ELECTRICITY BILL: Ksh 242,441.00\n"
                 "Fuel Energy Cost: Ksh 12,345.67\n"
@@ -304,6 +314,7 @@ class CliDefaultsTests(unittest.TestCase):
                 "HighRateConsumption": 6605,
                 "Method of Charge": "E-Mobility",
                 "Due Date": "07/10/2026",
+                "Issue Date": "22/09/2026",
             }
             for header, expected_value in expected.items():
                 self.assertEqual(values[headers.index(header)], expected_value)

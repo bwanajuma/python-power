@@ -41,6 +41,7 @@ class BillData:
     consumption: float | None
     bill: float | None
     due_date: str | None
+    issue_date: str | None
     low_rate_consumption: float | None
     high_rate_consumption: float | None
     method_of_charge: str | None = None
@@ -135,6 +136,11 @@ def extract_bill_data(text: str) -> BillData | None:
         text,
         re.IGNORECASE,
     )
+    issue_match = re.search(
+        r"(?:Issue\s+Date|Date\s+of\s+Issue)\s*:\s*(\d{1,2}/\d{1,2}/\d{4})",
+        text,
+        re.IGNORECASE,
+    )
     method_match = re.search(r"Method\s+of\s+Charge\s*:\s*([^\n\r]+)", text, re.IGNORECASE)
     tariff_match = TARIFF_CLASSIFICATION.search(method_match.group(1)) if method_match else None
     return BillData(
@@ -146,6 +152,7 @@ def extract_bill_data(text: str) -> BillData | None:
         bill=_extract_decimal(r"ELECTRICITY\s+BILL\s*:\s*K?sh\s*([\d,.]+)", text)
         or _extract_decimal(r"Total\s+Monthly\s+Bill\s+([\d,.]+)", text),
         due_date=due_match.group(1) if due_match else None,
+        issue_date=issue_match.group(1) if issue_match else None,
         low_rate_consumption=_extract_decimal(r"LowRateConsumption\s+([\d,.]+)\s*kWh", text),
         high_rate_consumption=_extract_decimal(r"HighRateConsumption\s+([\d,.]+)\s*kWh", text),
         method_of_charge=tariff_match.group(0).strip() if tariff_match else None,
@@ -184,6 +191,7 @@ def merge_bill_data(
             "consumption": "consumption",
             "Bill": "bill",
             "Due Date": "due_date",
+            "Issue Date": "issue_date",
             "Method of Charge": "method_of_charge",
             "LowRateConsumption": "low_rate_consumption",
             "HighRateConsumption": "high_rate_consumption",

@@ -14,9 +14,6 @@ from powerbills.swapdata import (
     column_letters,
     combine_reports,
     discover_dumps,
-    load_station_names,
-    match_stations,
-    normalize_station,
     period_bounds,
     period_from_filename,
     serial_to_datetime,
@@ -123,14 +120,6 @@ def test_period_from_filename() -> None:
     assert period_from_filename(Path("swap_dump.xlsx"), 2026) is None
 
 
-def test_normalize_station_ignores_case_and_spacing() -> None:
-    assert normalize_station("  Kilimani - Shujaa  Mall ") == normalize_station(
-        "KILIMANI   shujaa mall"
-    )
-    assert normalize_station("Athi River") == normalize_station("Athi-River")
-    assert normalize_station("Ahero") != normalize_station("Aheros")
-
-
 def test_aggregate_totals_only_in_period(tmp_path: Path) -> None:
     dump = build_dump(tmp_path / "August_Swap_Data.xlsx", sample_rows())
     report = aggregate_swap_dump(dump, year=2026)
@@ -200,66 +189,58 @@ def test_missing_file_raises(tmp_path: Path) -> None:
         aggregate_swap_dump(tmp_path / "nope.xlsx")
 
 
-def test_matching_ranks_matched_stations_first(tmp_path: Path) -> None:
-    dump = build_dump(tmp_path / "August_Swap_Data.xlsx", sample_rows())
-    report = aggregate_swap_dump(dump, year=2026)
-    known = {normalize_station("alendu"): "Alendu"}
-
-    pairs = match_stations(report, known)
-    assert [matched for _, matched in pairs] == ["Alendu", None, None]
-
-
-def test_load_station_names_normalizes_and_dedupes(tmp_path: Path) -> None:
-    from openpyxl import Workbook
-
-    path = tmp_path / "template.xlsx"
-    book = Workbook()
-    sheet = book.active
-    sheet.title = "August"
-    sheet.append(["Station", "Meter Number", "Account Number"])
-    sheet.append(["Ahero", "1", "2"])
-    sheet.append(["  ahero ", "3", "4"])
-    sheet.append([None, "5", "6"])
-    book.save(path)
-    book.close()
-
-    names = load_station_names(path)
-    assert names == {"ahero": "Ahero"}
-
-
 def test_summary_rows_and_workbook(tmp_path: Path) -> None:
     dump = build_dump(tmp_path / "August_Swap_Data.xlsx", sample_rows())
     report = aggregate_swap_dump(dump, year=2026)
-    known = {normalize_station("alendu"): "Alendu"}
-    rows = summary_rows([report], known)
+    rows = summary_rows([report])
+    alendu = next(row for row in rows if row["Swap Station"] == "Alendu")
 
-    assert rows[0]["Matched Station Name"] == "Alendu"
-    assert rows[0]["Net SOC"] == pytest.approx(20.5)
-    assert rows[0]["Average Net SOC"] == pytest.approx(20.5)
+    assert alendu["Net SOC"] == pytest.approx(20.5)
+    assert alendu["Billable SOC"] == pytest.approx(20.0)
+    assert alendu["Swap Cost"] == pytest.approx(300.0)
+    assert alendu["Average Net SOC"] == pytest.approx(20.5)
     assert all(row["Period"] == "2026-08" for row in rows)
 
-    output = write_summary(rows, [report], tmp_path / "out.xlsx", known)
+    output = write_summary(rows, [report], tmp_path / "out.xlsx")
     assert output.is_file()
+    from openpyxl import load_workbook
+
+    book = load_workbook(output, read_only=True)
+    assert book.sheetnames == ["Station Summary", "Metadata"]
+    assert next(book["Station Summary"].iter_rows(values_only=True)) == (
+        "Period",
+        "Swap Station",
+        "Swaps",
+        "Net SOC",
+        "Billable SOC",
+        "Swap Cost",
+        "Average Net SOC",
+        "First Swap",
+        "Last Swap",
+    )
+    book.close()
 
     csv_path = write_csv(rows, tmp_path / "out.csv")
-    assert csv_path.read_text(encoding="utf-8").splitlines()[0].startswith("Period,Matched")
+    assert csv_path.read_text(encoding="utf-8").splitlines()[0].startswith("Period,Swap Station")
+    assert "Matched Station Name" not in rows[0]
 
 
-def test_combine_reports_totals_every_period(tmp_path: Path) -> None:
+def test_combine_reports_totals_every_period_by_raw_station(tmp_path: Path) -> None:
     august = build_dump(tmp_path / "August_Swap_Data.xlsx", sample_rows())
     september = build_dump(tmp_path / "September_Swap_Data.xlsx", sample_rows())
     reports = [
         aggregate_swap_dump(august, year=2026),
         aggregate_swap_dump(september, year=2026),
     ]
-    known = {normalize_station("ahero"): "Ahero"}
-
-    rows = combine_reports(reports, known)
-    ahero = next(row for row in rows if row["Matched Station Name"] == "Ahero")
+    rows = combine_reports(reports)
+    ahero = next(row for row in rows if row["Swap Station"] == "Ahero")
     assert ahero["Period"] == "2026-08, 2026-09"
-    assert ahero["Net SOC"] == pytest.approx(1014.0)
-    assert ahero["Swaps"] == 3
-    assert ahero["Average Net SOC"] == pytest.approx(338.0)
+    assert ahero["Net SOC"] == pytest.approx(1009.0)
+    assert ahero["Billable SOC"] == pytest.approx(1008.0)
+    assert ahero["Swap Cost"] == pytest.approx(1149.5)
+    assert ahero["Swaps"] == 2
+    assert ahero["Average Net SOC"] == pytest.approx(1009 / 2)
+    assert {row["Swap Station"] for row in rows} == {"Ahero", "ahero", "Alendu"}
 
 
 def test_discover_dumps_expands_dirs_and_globs(tmp_path: Path) -> None:
